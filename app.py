@@ -17,13 +17,11 @@ import gradio as gr
 from gtts import gTTS
 import tempfile
 
-# Ensure TensorFlow is used as the Keras backend
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 # ==========================================
 # 1. INITIALIZATION & CONFIGURATION
 # ==========================================
-# Load configuration from yaml
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
@@ -32,13 +30,12 @@ SEQ_LENGTH = config["training"]["SEQ_LENGTH"]
 VOCAB_SIZE = config["training"]["VOCAB_SIZE"]
 VOCAB_PATH = config["paths"]["vocab_file"]
 
-# Text standardization logic (matching training phase)
 strip_chars = r"!\"#$%&'()*+,-./:;<=>?@[\]^_`{|}~".replace("<", "").replace(">", "")
+
 def custom_standardization(input_string):
     lowercase = tf.strings.lower(input_string)
     return tf.strings.regex_replace(lowercase, "[%s]" % re.escape(strip_chars), "")
 
-# Load vocabulary and setup vectorization
 vectorization = TextVectorization(
     max_tokens=VOCAB_SIZE,
     output_mode="int",
@@ -48,6 +45,7 @@ vectorization = TextVectorization(
 
 with open(VOCAB_PATH, "rb") as f:
     vectorization_loaded_data = pickle.load(f)
+
 vectorization.set_vocabulary(vectorization_loaded_data['vocab'])
 index_lookup = dict(zip(range(len(vectorization_loaded_data['vocab'])), vectorization_loaded_data['vocab']))
 max_decoded_sentence_length = SEQ_LENGTH - 1
@@ -57,7 +55,6 @@ max_decoded_sentence_length = SEQ_LENGTH - 1
 # ==========================================
 print("Loading Lightweight TFLite Models...")
 
-# Initialize Interpreters
 encoder_interpreter = tf.lite.Interpreter(model_path="echolens_encoder_quantized.tflite")
 encoder_interpreter.allocate_tensors()
 
@@ -67,78 +64,93 @@ decoder_interpreter.allocate_tensors()
 print("TFLite Models Loaded Successfully!")
 
 # ==========================================
-# 3. GRADIO INFERENCE PIPELINE (Robust Implementation)
+# 3. INFERENCE PIPELINE
 # ==========================================
-
-
 def process_and_predict(image_numpy):
     if image_numpy is None:
         return "Please upload an image.", None
 
     try:
-        # 1. Preprocess
-        img = tf.convert_to_tensor(image_numpy)
+        # 1. Preprocess image
+        img = tf.convert_to_tensor(image_numpy, dtype=tf.float32)
         img = tf.image.resize(img, IMAGE_SIZE)
-        img = tf.image.convert_image_dtype(img, tf.float32)
+        img = img / 255.0  # normalize to [0, 1]
         img = tf.expand_dims(img, 0)
+        img_np = np.array(img, dtype=np.float32)
 
         # 2. Run Encoder
-        enc_in = encoder_interpreter.get_input_details()[0]['index']
-        enc_out = encoder_interpreter.get_output_details()[0]['index']
-        encoder_interpreter.set_tensor(enc_in, img)
+        enc_input_details = encoder_interpreter.get_input_details()
+        enc_output_details = encoder_interpreter.get_output_details()
+
+        encoder_interpreter.resize_tensor_input(enc_input_details[0]['index'], img_np.shape)
+        encoder_interpreter.allocate_tensors()
+        encoder_interpreter.set_tensor(enc_input_details[0]['index'], img_np)
         encoder_interpreter.invoke()
-        encoded_img = encoder_interpreter.get_tensor(enc_out)
+        encoded_img = encoder_interpreter.get_tensor(enc_output_details[0]['index'])  # already np.ndarray
+        encoded_img = np.array(encoded_img, dtype=np.float32)
 
-        # 3. Detect decoder inputs by SHAPE, not name
+        # 3. Identify decoder inputs by dtype (int32=tokens, float32=image features)
         dec_details = decoder_interpreter.get_input_details()
-        
-        # Print for debugging (check Logs tab on HF)
         for d in dec_details:
-            print(f"Decoder input: name={d['name']}, shape={d['shape']}, dtype={d['dtype']}")
+            print(f"  Decoder input → name: {d['name']}, shape: {d['shape']}, dtype: {d['dtype']}")
 
-        # Identify by dtype: sequence tokens are int32, image features are float32
-        seq_detail = next(d for d in dec_details if d['dtype'] == np.int32)
-        enc_detail = next(d for d in dec_details if d['dtype'] == np.float32)
-        seq_idx = seq_detail['index']
-        enc_idx = enc_detail['index']
+        int32_inputs  = [d for d in dec_details if d['dtype'] == np.int32]
+        float32_inputs = [d for d in dec_details if d['dtype'] == np.float32]
 
+        if not int32_inputs or not float32_inputs:
+            raise ValueError(
+                f"Could not identify decoder inputs by dtype. "
+                f"Found dtypes: {[d['dtype'] for d in dec_details]}. "
+                f"Check Logs for tensor names."
+            )
+
+        seq_idx = int32_inputs[0]['index']
+        enc_idx = float32_inputs[0]['index']
         dec_out_idx = decoder_interpreter.get_output_details()[0]['index']
 
-        # 4. Decoding Loop
+        # 4. Autoregressive decoding loop
         decoded_caption = "<start> "
+
         for i in range(max_decoded_sentence_length):
             tokenized_caption = vectorization([decoded_caption])[:, :-1]
-            tokenized_caption = tf.cast(tokenized_caption, tf.int32)
+            tokenized_np = np.array(tokenized_caption, dtype=np.int32)
 
-            # Resize + allocate on EVERY iteration (required for dynamic shapes)
-            decoder_interpreter.resize_tensor_input(seq_idx, tokenized_caption.shape)
+            # Must resize + reallocate every iteration after first tensor shape is set
+            decoder_interpreter.resize_tensor_input(seq_idx, tokenized_np.shape)
             decoder_interpreter.resize_tensor_input(enc_idx, encoded_img.shape)
             decoder_interpreter.allocate_tensors()
 
-            decoder_interpreter.set_tensor(seq_idx, tokenized_caption.numpy())
-            decoder_interpreter.set_tensor(enc_idx, encoded_img.numpy())
+            # Use np.array() — safe for both ndarray and EagerTensor
+            decoder_interpreter.set_tensor(seq_idx, tokenized_np)
+            decoder_interpreter.set_tensor(enc_idx, encoded_img)
             decoder_interpreter.invoke()
 
             predictions = decoder_interpreter.get_tensor(dec_out_idx)
             sampled_token_index = np.argmax(predictions[0, i, :])
             sampled_token = index_lookup.get(sampled_token_index, "")
 
-            if sampled_token == "<end>" or sampled_token == "":
+            if sampled_token in ("<end>", ""):
                 break
+
             decoded_caption += " " + sampled_token
 
         final_caption = decoded_caption.replace("<start>", "").strip()
+        print(f"Generated caption: {final_caption}")
 
+        if not final_caption:
+            return "Could not generate a caption. Please try another image.", None
+
+        # 5. Text-to-Speech
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
             tts = gTTS(text=final_caption, lang='en', slow=False)
             tts.save(temp_audio.name)
             return final_caption, temp_audio.name
 
     except Exception as e:
-        print(f"ERROR in process_and_predict: {e}")
         import traceback
         traceback.print_exc()
         return f"Error: {str(e)}", None
+
 
 # ==========================================
 # 4. GRADIO INTERFACE
@@ -146,7 +158,7 @@ def process_and_predict(image_numpy):
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 👁️ EchoLens (Edge-Optimized Cloud)")
     gr.Markdown("Real-time captioning and audio descriptions. Optimized with TFLite.")
-    
+
     with gr.Row():
         with gr.Column():
             image_input = gr.Image(type="numpy", label="Upload/Capture")
@@ -154,9 +166,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         with gr.Column():
             text_output = gr.Textbox(label="Caption")
             audio_output = gr.Audio(label="Audio", type="filepath", autoplay=True)
-            
-    submit_btn.click(process_and_predict, inputs=image_input, outputs=[text_output, audio_output])
+
+    submit_btn.click(
+        fn=process_and_predict,
+        inputs=image_input,
+        outputs=[text_output, audio_output]
+    )
 
 if __name__ == "__main__":
-    # Required for Docker Spaces
     demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
