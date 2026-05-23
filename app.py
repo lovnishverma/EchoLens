@@ -66,49 +66,45 @@ decoder_interpreter.allocate_tensors()
 print("TFLite Models Loaded Successfully!")
 
 # ==========================================
-# 3. GRADIO INFERENCE PIPELINE
+# 3. GRADIO INFERENCE PIPELINE (Robust Implementation)
 # ==========================================
 def process_and_predict(image_numpy):
-    """
-    Preprocesses input, executes TFLite inference, 
-    and generates audio description.
-    """
     if image_numpy is None:
         return "Please upload an image.", None
     
-    # Preprocess Gradio Image
+    # 1. Preprocess
     img = tf.convert_to_tensor(image_numpy)
     img = tf.image.resize(img, IMAGE_SIZE)
     img = tf.image.convert_image_dtype(img, tf.float32)
     img = tf.expand_dims(img, 0)
     
-    # Run TFLite Encoder
+    # 2. Run Encoder
     enc_in = encoder_interpreter.get_input_details()[0]['index']
     enc_out = encoder_interpreter.get_output_details()[0]['index']
     encoder_interpreter.set_tensor(enc_in, img)
     encoder_interpreter.invoke()
     encoded_img = encoder_interpreter.get_tensor(enc_out)
     
-    # Prepare Decoder
+    # 3. Prepare Decoder once
     dec_details = decoder_interpreter.get_input_details()
     seq_idx = next(d['index'] for d in dec_details if 'sequence' in d['name'].lower())
     enc_idx = next(d['index'] for d in dec_details if 'encoded' in d['name'].lower())
     dec_out_idx = decoder_interpreter.get_output_details()[0]['index']
 
-    # Autoregressive Decoding
+    # 4. Decoding Loop
     decoded_caption = "<start> "
     for i in range(max_decoded_sentence_length):
         tokenized_caption = vectorization([decoded_caption])[:, :-1]
-        
-        # --- FIX: Explicitly cast to int32 to prevent ValueError ---
         tokenized_caption = tf.cast(tokenized_caption, tf.int32)
         
-        # Resize tensors for dynamic sequence generation
-        decoder_interpreter.resize_tensor_input(seq_idx, tokenized_caption.shape)
-        decoder_interpreter.resize_tensor_input(enc_idx, encoded_img.shape)
-        decoder_interpreter.allocate_tensors()
+        # FIX: Only resize if the input size is truly changing
+        # If the input shape is fixed during the first iteration, 
+        # avoid re-allocating inside the loop.
+        if i == 0:
+            decoder_interpreter.resize_tensor_input(seq_idx, tokenized_caption.shape)
+            decoder_interpreter.resize_tensor_input(enc_idx, encoded_img.shape)
+            decoder_interpreter.allocate_tensors()
         
-        # Set tensors (convert to numpy) and invoke
         decoder_interpreter.set_tensor(seq_idx, tokenized_caption.numpy())
         decoder_interpreter.set_tensor(enc_idx, encoded_img.numpy())
         decoder_interpreter.invoke()
@@ -123,12 +119,12 @@ def process_and_predict(image_numpy):
 
     final_caption = decoded_caption.replace("<start> ", "").replace(" <end>", "").strip()
     
-    # Generate Audio using gTTS
-    audio_path = "output_caption.mp3"
-    tts = gTTS(text=final_caption, lang='en', slow=False)
-    tts.save(audio_path)
-    
-    return final_caption, audio_path
+    # Generate Audio using temp file (Avoids permission errors)
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+        tts = gTTS(text=final_caption, lang='en', slow=False)
+        tts.save(temp_audio.name)
+        return final_caption, temp_audio.name
 
 # ==========================================
 # 4. GRADIO INTERFACE
