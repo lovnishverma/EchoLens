@@ -68,6 +68,8 @@ print("TFLite Models Loaded Successfully!")
 # ==========================================
 # 3. GRADIO INFERENCE PIPELINE (Robust Implementation)
 # ==========================================
+import tempfile
+
 def process_and_predict(image_numpy):
     if image_numpy is None:
         return "Please upload an image.", None
@@ -85,7 +87,7 @@ def process_and_predict(image_numpy):
     encoder_interpreter.invoke()
     encoded_img = encoder_interpreter.get_tensor(enc_out)
     
-    # 3. Prepare Decoder once
+    # 3. Prepare Decoder
     dec_details = decoder_interpreter.get_input_details()
     seq_idx = next(d['index'] for d in dec_details if 'sequence' in d['name'].lower())
     enc_idx = next(d['index'] for d in dec_details if 'encoded' in d['name'].lower())
@@ -97,9 +99,7 @@ def process_and_predict(image_numpy):
         tokenized_caption = vectorization([decoded_caption])[:, :-1]
         tokenized_caption = tf.cast(tokenized_caption, tf.int32)
         
-        # FIX: Only resize if the input size is truly changing
-        # If the input shape is fixed during the first iteration, 
-        # avoid re-allocating inside the loop.
+        # FIX: Only allocate memory on the first iteration
         if i == 0:
             decoder_interpreter.resize_tensor_input(seq_idx, tokenized_caption.shape)
             decoder_interpreter.resize_tensor_input(enc_idx, encoded_img.shape)
@@ -119,8 +119,7 @@ def process_and_predict(image_numpy):
 
     final_caption = decoded_caption.replace("<start> ", "").replace(" <end>", "").strip()
     
-    # Generate Audio using temp file (Avoids permission errors)
-    import tempfile
+    # Use tempfile for writing to ensure compatibility with Docker restricted FS
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
         tts = gTTS(text=final_caption, lang='en', slow=False)
         tts.save(temp_audio.name)
