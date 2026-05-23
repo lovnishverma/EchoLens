@@ -1,0 +1,9 @@
+image_preprocessing:
+  IMAGE_SIZE: [299, 299]
+
+training:
+  VOCAB_SIZE: 10000
+  SEQ_LENGTH: 25
+
+paths:
+  vocab_file: "vectorization_layer_state.pkl"
