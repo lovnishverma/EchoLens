@@ -157,43 +157,44 @@ def run_decoder_step(tokenized_np: np.ndarray, encoded_img: np.ndarray) -> np.nd
 
 
 def generate_caption(encoded_img: np.ndarray) -> str:
-    """
-    Autoregressive decoding — exactly mirrors training inference:
-        decoded_caption = "<start> "
-        for i in range(max_decoded_sentence_length):
-            tokenized_caption = vectorization([decoded_caption])[:, :-1]
-            predictions = decoder(tokenized_caption, encoded_img, ...)
-            sampled_token_index = np.argmax(predictions[0, i, :])
-    """
     decoded_caption = "<start> "
 
     for i in range(max_decoded_sentence_length):
-        # Vectorize current caption — slice [:, :-1] exactly as in training
-        tokenized = vectorization([decoded_caption])[:, :-1]           # (1, SEQ_LENGTH-1)
+        tokenized = vectorization([decoded_caption])[:, :-1]
         tokenized_np = np.array(tokenized, dtype=np.int32)
 
-        predictions = run_decoder_step(tokenized_np, encoded_img)      # (1, seq, vocab)
+        predictions = run_decoder_step(tokenized_np, encoded_img)
 
-        # Handle both (1, seq_len, vocab) and (1, vocab) output shapes
+        # predictions shape: (1, SEQ_LENGTH-1, VOCAB_SIZE)
+        # At step i, the number of real tokens so far = i+1 (including <start>)
+        # We want the prediction AT the last filled position
+        # Count non-zero tokens to find correct position
+        num_tokens = np.count_nonzero(tokenized_np[0])  # how many tokens filled so far
+        pos = max(0, num_tokens - 1)                     # predict next from last position
+
         if predictions.ndim == 3:
-            token_probs = predictions[0, i, :]
+            token_probs = predictions[0, pos, :]
         elif predictions.ndim == 2:
             token_probs = predictions[0, :]
         else:
             token_probs = predictions.flatten()
 
+        # Skip special/reserved tokens (indices 0,1,2,3 = pad, unk, start, end)
+        token_probs[:4] = 0
+
         sampled_token_index = np.argmax(token_probs)
         sampled_token = index_lookup.get(sampled_token_index, "")
 
-        print(f"  step {i:02d} → idx={sampled_token_index}  token='{sampled_token}'")
+        print(f"  step {i:02d} pos={pos} → idx={sampled_token_index}  token='{sampled_token}'")
 
         if sampled_token in ("<end>", ""):
             break
 
         decoded_caption += " " + sampled_token
 
-    # Clean up
-    caption = decoded_caption.replace("<start>", "").replace("<end>", "").strip()
+    caption = decoded_caption.replace("<start>", "").strip()
+    # Safety strip: remove any leading standalone digits
+    caption = re.sub(r'^\d+\s+', '', caption).strip()
     return caption
 
 
