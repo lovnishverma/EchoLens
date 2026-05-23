@@ -15,6 +15,7 @@ import pickle
 import yaml
 import gradio as gr
 from gtts import gTTS
+import tempfile
 
 # Ensure TensorFlow is used as the Keras backend
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -68,62 +69,76 @@ print("TFLite Models Loaded Successfully!")
 # ==========================================
 # 3. GRADIO INFERENCE PIPELINE (Robust Implementation)
 # ==========================================
-import tempfile
+
 
 def process_and_predict(image_numpy):
     if image_numpy is None:
         return "Please upload an image.", None
-    
-    # 1. Preprocess
-    img = tf.convert_to_tensor(image_numpy)
-    img = tf.image.resize(img, IMAGE_SIZE)
-    img = tf.image.convert_image_dtype(img, tf.float32)
-    img = tf.expand_dims(img, 0)
-    
-    # 2. Run Encoder
-    enc_in = encoder_interpreter.get_input_details()[0]['index']
-    enc_out = encoder_interpreter.get_output_details()[0]['index']
-    encoder_interpreter.set_tensor(enc_in, img)
-    encoder_interpreter.invoke()
-    encoded_img = encoder_interpreter.get_tensor(enc_out)
-    
-    # 3. Prepare Decoder
-    dec_details = decoder_interpreter.get_input_details()
-    seq_idx = next(d['index'] for d in dec_details if 'sequence' in d['name'].lower())
-    enc_idx = next(d['index'] for d in dec_details if 'encoded' in d['name'].lower())
-    dec_out_idx = decoder_interpreter.get_output_details()[0]['index']
 
-    # 4. Decoding Loop
-    decoded_caption = "<start> "
-    for i in range(max_decoded_sentence_length):
-        tokenized_caption = vectorization([decoded_caption])[:, :-1]
-        tokenized_caption = tf.cast(tokenized_caption, tf.int32)
+    try:
+        # 1. Preprocess
+        img = tf.convert_to_tensor(image_numpy)
+        img = tf.image.resize(img, IMAGE_SIZE)
+        img = tf.image.convert_image_dtype(img, tf.float32)
+        img = tf.expand_dims(img, 0)
+
+        # 2. Run Encoder
+        enc_in = encoder_interpreter.get_input_details()[0]['index']
+        enc_out = encoder_interpreter.get_output_details()[0]['index']
+        encoder_interpreter.set_tensor(enc_in, img)
+        encoder_interpreter.invoke()
+        encoded_img = encoder_interpreter.get_tensor(enc_out)
+
+        # 3. Detect decoder inputs by SHAPE, not name
+        dec_details = decoder_interpreter.get_input_details()
         
-        # FIX: Only allocate memory on the first iteration
-        if i == 0:
+        # Print for debugging (check Logs tab on HF)
+        for d in dec_details:
+            print(f"Decoder input: name={d['name']}, shape={d['shape']}, dtype={d['dtype']}")
+
+        # Identify by dtype: sequence tokens are int32, image features are float32
+        seq_detail = next(d for d in dec_details if d['dtype'] == np.int32)
+        enc_detail = next(d for d in dec_details if d['dtype'] == np.float32)
+        seq_idx = seq_detail['index']
+        enc_idx = enc_detail['index']
+
+        dec_out_idx = decoder_interpreter.get_output_details()[0]['index']
+
+        # 4. Decoding Loop
+        decoded_caption = "<start> "
+        for i in range(max_decoded_sentence_length):
+            tokenized_caption = vectorization([decoded_caption])[:, :-1]
+            tokenized_caption = tf.cast(tokenized_caption, tf.int32)
+
+            # Resize + allocate on EVERY iteration (required for dynamic shapes)
             decoder_interpreter.resize_tensor_input(seq_idx, tokenized_caption.shape)
             decoder_interpreter.resize_tensor_input(enc_idx, encoded_img.shape)
             decoder_interpreter.allocate_tensors()
-        
-        decoder_interpreter.set_tensor(seq_idx, tokenized_caption.numpy())
-        decoder_interpreter.set_tensor(enc_idx, encoded_img.numpy())
-        decoder_interpreter.invoke()
-        
-        predictions = decoder_interpreter.get_tensor(dec_out_idx)
-        sampled_token_index = np.argmax(predictions[0, i, :])
-        sampled_token = index_lookup.get(sampled_token_index, "<unk>")
-        
-        if sampled_token == "<end>":
-            break
-        decoded_caption += " " + sampled_token
 
-    final_caption = decoded_caption.replace("<start> ", "").replace(" <end>", "").strip()
-    
-    # Use tempfile for writing to ensure compatibility with Docker restricted FS
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
-        tts = gTTS(text=final_caption, lang='en', slow=False)
-        tts.save(temp_audio.name)
-        return final_caption, temp_audio.name
+            decoder_interpreter.set_tensor(seq_idx, tokenized_caption.numpy())
+            decoder_interpreter.set_tensor(enc_idx, encoded_img.numpy())
+            decoder_interpreter.invoke()
+
+            predictions = decoder_interpreter.get_tensor(dec_out_idx)
+            sampled_token_index = np.argmax(predictions[0, i, :])
+            sampled_token = index_lookup.get(sampled_token_index, "")
+
+            if sampled_token == "<end>" or sampled_token == "":
+                break
+            decoded_caption += " " + sampled_token
+
+        final_caption = decoded_caption.replace("<start>", "").strip()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+            tts = gTTS(text=final_caption, lang='en', slow=False)
+            tts.save(temp_audio.name)
+            return final_caption, temp_audio.name
+
+    except Exception as e:
+        print(f"ERROR in process_and_predict: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error: {str(e)}", None
 
 # ==========================================
 # 4. GRADIO INTERFACE
