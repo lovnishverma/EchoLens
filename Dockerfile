@@ -2,8 +2,9 @@
 FROM python:3.10-slim
 
 # Install system-level C++ dependencies for OpenCV, Audio, and TF Flex Delegate
+# FIX: Updated obsolete 'libgl1-mesa-glx' to 'libgl1' for the latest Debian slim
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
