@@ -16,7 +16,7 @@ import yaml
 import gradio as gr
 from gtts import gTTS
 
-# Set backend to ensure compatibility
+# Ensure TensorFlow is used as the Keras backend
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
 # ==========================================
@@ -56,7 +56,7 @@ max_decoded_sentence_length = SEQ_LENGTH - 1
 # ==========================================
 print("Loading Lightweight TFLite Models...")
 
-# Initialize Interpreters (TFLite handles Flex delegates automatically if available)
+# Initialize Interpreters
 encoder_interpreter = tf.lite.Interpreter(model_path="echolens_encoder_quantized.tflite")
 encoder_interpreter.allocate_tensors()
 
@@ -99,6 +99,8 @@ def process_and_predict(image_numpy):
     decoded_caption = "<start> "
     for i in range(max_decoded_sentence_length):
         tokenized_caption = vectorization([decoded_caption])[:, :-1]
+        
+        # --- FIX: Explicitly cast to int32 to prevent ValueError ---
         tokenized_caption = tf.cast(tokenized_caption, tf.int32)
         
         # Resize tensors for dynamic sequence generation
@@ -106,6 +108,7 @@ def process_and_predict(image_numpy):
         decoder_interpreter.resize_tensor_input(enc_idx, encoded_img.shape)
         decoder_interpreter.allocate_tensors()
         
+        # Set tensors (convert to numpy) and invoke
         decoder_interpreter.set_tensor(seq_idx, tokenized_caption.numpy())
         decoder_interpreter.set_tensor(enc_idx, encoded_img.numpy())
         decoder_interpreter.invoke()
