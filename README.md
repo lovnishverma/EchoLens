@@ -18,6 +18,11 @@ pinned: false
 
 ---
 
+Dateset: https://www.kaggle.com/datasets/princelv84/flickr30k
+Pretraining Notebook: https://www.kaggle.com/code/princelv84/training-notebook-echolens-ultimate-image-caption
+Fine Tuning Dataset: https://www.kaggle.com/datasets/awsaf49/coco-2017-dataset
+Finetuning notebook: https://www.kaggle.com/code/princelv84/coco-2017-dataset
+
 ## 🚀 System Capabilities
 
 EchoLens Lite is designed for accessibility and edge-deployment efficiency. It processes uploaded media to produce:
