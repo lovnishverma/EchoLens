@@ -5,6 +5,7 @@ colorFrom: purple
 colorTo: gray
 sdk: docker
 pinned: false
+license: apache-2.0
 ---
 
 # 👁️ EchoLens Lite — Edge-Optimized Image Captioning with Audio Synthesis
