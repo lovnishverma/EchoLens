@@ -53,13 +53,13 @@ Sequence (<start>) ───> [ Transformer Decoder (2-Head Cross-Attention) ] �
 * **Transformer Decoder:** Autoregressive generator with 2-head cross-attention mapping the encoded image representation and previous tokens to output probabilities.
 * **Vocabulary:** Constrained to 10,000 distinct tokens, outputting sequences up to 25 tokens in length (`SEQ_LENGTH=25`).
 
-### Artifact Footprint
+### Artifact Footprint (After Fine-Tuning)
 
 | File | Quantization | Size |
 | --- | --- | --- |
-| `echolens_encoder_quantized.tflite` | 8-bit dynamic | 6.31 MB |
-| `echolens_decoder_quantized.tflite` | 8-bit dynamic | 15.3 MB |
-| `vectorization_layer_state.pkl` | Protocol-4 | 662 KB |
+| `echolens_encoder_quantized.tflite` | 8-bit dynamic | 7.01 MB |
+| `echolens_decoder_quantized.tflite` | 8-bit dynamic | 14.4 MB |
+| `vectorization_layer_state.pkl` | Protocol-4 | 647 KB |
 
 ---
 
