@@ -9,6 +9,8 @@ pinned: false
 
 # 👁️ EchoLens Lite — Edge-Optimized Image Captioning
 
+fine tuning notebook url: https://www.kaggle.com/code/princelv84/coco-2017-dataset
+
 > Upload any image → get an automatic caption + spoken audio description, powered by a quantized TFLite model running entirely in the cloud.
 
 [![Hugging Face Space](https://img.shields.io/badge/🤗%20HuggingFace-EchoLensLite-blue)](https://huggingface.co/spaces/LovnishVerma/EchoLensLite)
@@ -33,10 +35,13 @@ It runs on quantized TFLite models (~22 MB total), making it fast and lightweigh
 
 The system is a two-stage pipeline:
 
+
 ```
+
 Image → [EfficientNetB0 CNN + Transformer Encoder] → Image Features
-                                                            ↓
-                         <start> token → [Transformer Decoder] → Caption tokens (autoregressive)
+↓
+ token → [Transformer Decoder] → Caption tokens (autoregressive)
+
 ```
 
 | Component | Details |
@@ -79,7 +84,9 @@ The model was trained on the **Flickr30k dataset** (~31,000 images, 5 captions e
 
 ## 🗂️ Repository Structure
 
+
 ```
+
 EchoLensLite/
 ├── app.py                              # Gradio inference app
 ├── config.yaml                         # Model hyperparameters
@@ -89,6 +96,7 @@ EchoLensLite/
 ├── echolens_encoder_quantized.tflite   # Quantized encoder (6.31 MB)
 ├── echolens_decoder_quantized.tflite   # Quantized decoder (15.3 MB)
 └── training-notebook-echolens-ultimate-image-caption (kaggle).ipynb
+
 ```
 
 ---
@@ -118,10 +126,11 @@ EchoLensLite/
 ## 🔧 Run Locally
 
 ```bash
-git clone https://huggingface.co/spaces/LovnishVerma/EchoLensLite
+git clone [https://huggingface.co/spaces/LovnishVerma/EchoLensLite](https://huggingface.co/spaces/LovnishVerma/EchoLensLite)
 cd EchoLensLite
 pip install -r requirements.txt
 python app.py
+
 ```
 
 Then open `http://localhost:7860` in your browser.
@@ -140,3 +149,4 @@ Then open `http://localhost:7860` in your browser.
 
 This project is released for educational and research use.
 Dataset credit: Flickr30k — Young et al., *From image descriptions to visual denotations*, TACL 2014.
+
