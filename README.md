@@ -207,7 +207,7 @@ The model uses a **two-stage transfer learning paradigm** to maximize generaliza
 
 MS-COCO is larger and more diverse than Flickr30k, covering 80 object categories across complex real-world scenes. Fine-tuning on COCO substantially improves caption quality and vocabulary coverage for everyday imagery.
 
-- Up to 60,000 training images and 5,000 validation images used (capped via `MAX_COCO_TRAIN / MAX_COCO_VAL`).
+- Images used Full 118k ( if you want you can limit Up to 60,000 training images and 5,000 validation images capped via `MAX_COCO_TRAIN / MAX_COCO_VAL`).
 - Annotations loaded from COCO JSON format (`captions_train2017.json`, `captions_val2017.json`).
 - Each image padded or truncated to exactly 5 captions (`NUM_CAPTIONS_PER_IMAGE = 5`) to produce rectangular tensors for efficient batching.
 - The pre-trained Flickr30k vocabulary is reused — no vocabulary re-adaptation.
